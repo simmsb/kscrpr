@@ -1,4 +1,6 @@
 use color_eyre::Result;
+use indicatif::ProgressBar;
+use itertools::Itertools;
 use once_cell::sync::OnceCell;
 use reqwest::{Client, Url};
 use scraper::{Html, Selector};
@@ -93,11 +95,8 @@ async fn fetch_archive(client: &Client, url: &Url) -> Result<Archive> {
     let parody = doc
         .select(article_parody_selector())
         .next()
-        .unwrap()
-        .text()
-        .next()
-        .unwrap()
-        .to_owned();
+        .map(|p| p.text().join("").trim().to_owned())
+        .unwrap_or_else(|| "".to_owned());
 
     let tags = doc
         .select(article_tags_selector())
@@ -141,8 +140,16 @@ async fn fetch_archive(client: &Client, url: &Url) -> Result<Archive> {
     })
 }
 
-pub async fn fetch_tag_page(fs: &FileSystem, tag: &str, page_n: u32) -> Result<Option<Vec<Archive>>> {
+pub async fn fetch_tag_page(
+    fs: &FileSystem,
+    tag: &str,
+    page_n: u32,
+    msg_bar: &ProgressBar,
+    prog_bar: &ProgressBar,
+) -> Result<Option<Vec<Archive>>> {
     tracing::debug!(tag, page_n, "Fetching tag page");
+    msg_bar.set_prefix("Fetching page");
+    msg_bar.set_message("");
 
     let config = config();
     let client = client();
@@ -163,7 +170,12 @@ pub async fn fetch_tag_page(fs: &FileSystem, tag: &str, page_n: u32) -> Result<O
 
     let mut archives = vec![];
 
-    for article_url in doc.select(tag_view_archive_selector()) {
+    msg_bar.set_prefix("Fetching metadata");
+
+    let urls = doc.select(tag_view_archive_selector()).collect::<Vec<_>>();
+    prog_bar.set_length(urls.len() as u64);
+    prog_bar.set_position(0);
+    for article_url in urls {
         let url = match article_url.value().attr("href") {
             Some(u) => u,
             None => {
@@ -171,6 +183,8 @@ pub async fn fetch_tag_page(fs: &FileSystem, tag: &str, page_n: u32) -> Result<O
                 continue;
             }
         };
+
+        msg_bar.set_message(url.to_owned());
 
         let url = config.base_url.join(url)?;
 
@@ -193,6 +207,8 @@ pub async fn fetch_tag_page(fs: &FileSystem, tag: &str, page_n: u32) -> Result<O
                 tracing::error!(error = fuck_error(&e), %url, "Failed to fetch archive");
             }
         }
+
+        prog_bar.inc(1);
     }
 
     Ok(Some(archives))

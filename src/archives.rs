@@ -1,5 +1,6 @@
 use std::io::{Cursor, Read, Seek};
 
+use bytes::Bytes;
 use color_eyre::Result;
 use url::Url;
 use zip::ZipArchive;
@@ -25,15 +26,24 @@ pub struct Archive {
 }
 
 impl Archive {
-    pub async fn download(&self) -> Result<ZipArchive<impl Read + Seek>> {
-        let body = client()
+    pub async fn download(&self, inspector: impl Fn(Option<u64>, &Bytes)) -> Result<ZipArchive<impl Read + Seek>> {
+        let mut body = client()
             .get(self.download_url.as_str())
             .send()
-            .await?
-            .bytes()
             .await?;
 
-        let zip = zip::ZipArchive::new(Cursor::new(body))?;
+        let mut v = Vec::new();
+
+        if let Some(size_hint) = body.content_length() {
+            v.reserve(size_hint as usize);
+        }
+
+        while let Some(buf) = body.chunk().await? {
+            v.extend_from_slice(&buf);
+            inspector(body.content_length(), &buf);
+        }
+
+        let zip = zip::ZipArchive::new(Cursor::new(v))?;
 
         Ok(zip)
     }

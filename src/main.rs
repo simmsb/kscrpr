@@ -21,7 +21,9 @@ fn install_tracing() -> color_eyre::Result<()> {
         .with_span_events(FmtSpan::CLOSE);
     // .pretty();
     let filter_layer =
-        tracing_subscriber::EnvFilter::from_default_env().add_directive("kscrpr=debug".parse()?);
+        tracing_subscriber::EnvFilter::from_default_env()
+            .add_directive("kscrpr=error".parse()?)
+        ;
 
     tracing_subscriber::registry()
         .with(tracing_error::ErrorLayer::default())
@@ -32,11 +34,15 @@ fn install_tracing() -> color_eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     install_tracing()?;
 
     color_eyre::install()?;
+
+    ctrlc::set_handler(move || {
+        utils::RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }).unwrap();
 
     command::do_stuff().await?;
 

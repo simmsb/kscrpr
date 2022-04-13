@@ -46,7 +46,7 @@ impl Searcher {
         let parody = schema.get_field("parody").unwrap();
         let tag = schema.get_field("tag").unwrap();
 
-        let mut writer = self.writer.lock().await;
+        let writer = self.writer.lock().await;
 
         let mut doc = doc!(
             id => archive.id as u64,
@@ -61,6 +61,11 @@ impl Searcher {
 
         writer.add_document(doc)?;
 
+        Ok(())
+    }
+
+    pub async fn commit(&self) -> Result<()> {
+        let mut writer = self.writer.lock().await;
         writer.prepare_commit()?.commit_async().await?;
 
         Ok(())
