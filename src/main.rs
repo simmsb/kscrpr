@@ -40,10 +40,6 @@ async fn main() -> Result<()> {
 
     color_eyre::install()?;
 
-    ctrlc::set_handler(move || {
-        utils::RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
-    }).unwrap();
-
     command::do_stuff().await?;
 
     Ok(())

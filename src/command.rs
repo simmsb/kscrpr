@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use clap::IntoApp;
 use color_eyre::Result;
+use dialoguer::theme::ColorfulTheme;
+use dialoguer::FuzzySelect;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use crate::archives::Archive;
@@ -10,7 +12,7 @@ use crate::config::{
 };
 use crate::downloader::{by_id, fetch_tag_page};
 use crate::filesystem::FileSystem;
-use crate::utils::user_has_quit;
+use crate::utils::{self, user_has_quit};
 
 pub async fn do_stuff() -> Result<()> {
     let config = config();
@@ -36,6 +38,11 @@ impl Command {
 }
 
 async fn do_reindex() -> Result<()> {
+    ctrlc::set_handler(move || {
+        utils::RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    })
+    .unwrap();
+
     let bar = MultiProgress::new();
     let msg_bar = bar.add(ProgressBar::new(1).with_style(
         ProgressStyle::with_template("{spinner:.green} {prefix:.cyan} {wide_msg}").unwrap(),
@@ -91,6 +98,11 @@ async fn do_reindex() -> Result<()> {
 
 impl FetchCommand {
     pub async fn go(&self) -> Result<()> {
+        ctrlc::set_handler(move || {
+            utils::RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+        })
+        .unwrap();
+
         let fs = FileSystem::open()?;
 
         match self {
@@ -119,17 +131,11 @@ impl FetchCommand {
                         page,
                         new_archives.len()
                     ));
-                    prog_bar.set_style(
-                        ProgressStyle::with_template("{pos:>}/{len}")
-                            .unwrap(),
-                    );
+                    prog_bar.set_style(ProgressStyle::with_template("{pos:>}/{len}").unwrap());
 
                     if let Some(a) = fetch_tag_page(&fs, tag, page, &msg_bar, &prog_bar).await? {
                         prog_bar.set_style(
-                            ProgressStyle::with_template(
-                                "{bytes:>}/{total_bytes}",
-                            )
-                            .unwrap(),
+                            ProgressStyle::with_template("{bytes:>}/{total_bytes}").unwrap(),
                         );
 
                         for archive in a {
@@ -204,8 +210,8 @@ impl DirCommand {
         let fs = FileSystem::open()?;
 
         let path = match self {
-            DirCommand::Tag => fs.data_tag_dir(),
-            DirCommand::Artist => fs.data_artist_dir(),
+            DirCommand::Tag => fs.rendered_tag_dir(),
+            DirCommand::Artist => fs.rendered_artist_dir(),
             DirCommand::Data => fs.data_dir(),
             DirCommand::Meta => fs.meta_dir(),
         };
@@ -216,41 +222,85 @@ impl DirCommand {
     }
 }
 
+fn do_pick(docs: &[Archive], open: bool, output_as: OutputAsType, fs: &FileSystem) -> Result<()> {
+    let archive_names = docs
+        .iter()
+        .map(|a| a.pretty_single_line())
+        .collect::<Vec<_>>();
+
+    let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
+        .with_prompt("Select archive")
+        .default(0)
+        .items(&archive_names)
+        .interact_opt()?;
+
+    let selection = match selection {
+        Some(s) => s,
+        None => return Ok(()),
+    };
+
+    let selected = &docs[selection];
+
+    if open {
+        let path = fs.rendered_file_of_id(selected.id);
+        opener::open(path)?;
+    } else {
+        output_as.print(selected, &fs);
+    }
+
+    Ok(())
+}
+
 impl GetCommand {
     pub async fn go(&self, output_as: OutputAsType) -> Result<()> {
         let fs = FileSystem::open()?;
 
         match self {
-            GetCommand::Tag { tags } => {
+            GetCommand::Tag { tags, pick, open } => {
                 let docs = fs.with_all_tags(tags).await?;
+
+                let pick = pick | open;
 
                 if docs.is_empty() {
                     eprintln!("Nothing found :(");
-                }
-
-                for doc in docs {
-                    output_as.print(&doc, &fs);
+                } else if pick {
+                    do_pick(&docs, *open, output_as, &fs)?;
+                } else {
+                    for doc in docs {
+                        output_as.print(&doc, &fs);
+                    }
                 }
             }
-            GetCommand::Id { id } => {
+            GetCommand::Id { id, open } => {
                 let doc = fs.fetch_doc(*id)?;
 
-                output_as.print(&doc, &fs);
+                if *open {
+                    let path = fs.rendered_file_of_id(doc.id);
+                    opener::open(path)?;
+                } else {
+                    output_as.print(&doc, &fs);
+                }
             }
             GetCommand::Search {
                 query,
                 indexes,
                 max,
+                pick,
+                open,
             } => {
                 let indexes = indexes.iter().map(IndexType::str).collect::<Vec<_>>();
                 let docs = fs.search(query, &indexes, *max).await?;
 
+                let pick = pick | open;
+
                 if docs.is_empty() {
                     eprintln!("Nothing found :(");
-                }
-
-                for doc in docs {
-                    output_as.print(&doc, &fs);
+                } else if pick {
+                    do_pick(&docs, *open, output_as, &fs)?;
+                } else {
+                    for doc in docs {
+                        output_as.print(&doc, &fs);
+                    }
                 }
             }
         }
@@ -262,14 +312,18 @@ impl GetCommand {
 impl OutputAsType {
     pub fn print(&self, doc: &Archive, fs: &FileSystem) {
         match self {
-            OutputAsType::IdPath => println!("{}", fs.data_dir_of_id(doc.id).display()),
-            OutputAsType::Path => println!(
+            OutputAsType::DataIdPath => println!("{}", fs.data_dir_of_id(doc.id).display()),
+            OutputAsType::DataPath => println!(
                 "{}",
                 fs.data_dir_of_artist(&doc.artist).join(&doc.name).display()
             ),
             OutputAsType::Id => println!("{}", doc.id),
             OutputAsType::Url => println!("{}", doc.base_url),
             OutputAsType::Name => println!("{}", doc.name),
+            OutputAsType::IdPath => println!("{}", fs.rendered_file_of_id(doc.id).display()),
+            OutputAsType::Path => {
+                println!("{}", fs.rendered_file_for_archive_by_artist(&doc).display())
+            }
         }
     }
 }

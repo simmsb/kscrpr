@@ -47,4 +47,8 @@ impl Archive {
 
         Ok(zip)
     }
+
+    pub fn pretty_single_line(&self) -> String {
+        format!("[{}] {}", self.artist, self.name)
+    }
 }

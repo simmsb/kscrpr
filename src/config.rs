@@ -27,7 +27,7 @@ pub enum Command {
     Get {
         #[clap(subcommand)]
         command: GetCommand,
-        #[clap(arg_enum, default_value_t = OutputAsType::Path)]
+        #[clap(long, arg_enum, default_value_t = OutputAsType::Path)]
         output_as: OutputAsType,
     },
     /// Fetch archives from the site
@@ -58,10 +58,19 @@ pub enum FetchCommand {
 #[derive(ArgEnum, Clone, Copy, PartialEq, Eq)]
 #[clap(rename_all = "snake_case")]
 pub enum OutputAsType {
+    /// Show the path to the archive images by the id
+    DataIdPath,
+    /// Show the path to the archive images by artist/archive name
+    DataPath,
+    /// Show the path to the rendered archive by the id
     IdPath,
+    /// Show the path to the rendered archive by artist/archive name
     Path,
+    /// Show the id of each archive
     Id,
+    /// Show the url of the archive
     Url,
+    /// Show the name of the archive
     Name,
 }
 
@@ -71,15 +80,41 @@ pub enum GetCommand {
     Tag {
         #[clap(min_values = 1)]
         tags: Vec<String>,
+
+        /// Display a ui for selecting from after filtering
+        #[clap(long)]
+        pick: bool,
+
+        /// Open the rendered archive. Implies --pick
+        #[clap(long)]
+        open: bool,
     },
     /// Get an archive by id
-    Id { id: u32 },
+    Id {
+        id: u32,
+        #[clap(long)]
+        open: bool,
+    },
     /// Search for things
     Search {
-        #[clap(long, short, arg_enum, default_values = &["name", "artist", "parody", "tag"])]
+        /// Default indexes to use for search terms that don't specify an index
+        ///
+        /// Specify an index with `index:term`, i.e. `tag:foo`
+        #[clap(long, arg_enum, default_values = &["name", "artist", "parody", "tag"])]
         indexes: Vec<IndexType>,
-        #[clap(long, short)]
+
+        /// Maximum number of results to show
+        #[clap(long)]
         max: Option<usize>,
+
+        /// Display a ui for selecting from after filtering
+        #[clap(long)]
+        pick: bool,
+
+        /// Open the rendered archive. Implies --pick
+        #[clap(long)]
+        open: bool,
+
         query: String,
     },
 }
@@ -106,9 +141,9 @@ impl IndexType {
 
 #[derive(Subcommand)]
 pub enum DirCommand {
-    /// Output the tag-organised directory root
+    /// Output the tag-organised rendered directory
     Tag,
-    /// Output the artist organised directory root
+    /// Output the artist organised rendered directory
     Artist,
     /// Output the data directory root
     Data,
