@@ -15,7 +15,7 @@ pub async fn by_id(id: u32) -> Result<Archive> {
     let config = config();
     let client = client();
 
-    let url = config.base_url.join(&id.to_string())?;
+    let url = config.base_url.join("archive/")?.join(&id.to_string())?;
 
     fetch_archive(client, &url).await
 }

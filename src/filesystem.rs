@@ -6,9 +6,8 @@ use std::path::{Path, PathBuf};
 
 use color_eyre::SectionExt;
 use color_eyre::{eyre::eyre, Help, Result};
-use image::EncodableLayout;
 use indicatif::ProgressBar;
-use jpeg_to_pdf::JpegToPdf;
+use printpdf::{image_crate::GenericImageView, PdfDocument, Px};
 use tracing::{debug, info_span, Instrument};
 
 use crate::archives::Archive;
@@ -304,8 +303,6 @@ impl FileSystem {
         source_path: &Path,
         destination: &Path,
     ) -> Result<()> {
-        use rayon::prelude::*;
-
         let file_types = HashSet::<&'static OsStr>::from_iter([
             OsStr::new("png"),
             OsStr::new("jpg"),
@@ -328,35 +325,21 @@ impl FileSystem {
 
         let out_file = File::create(destination)?;
 
-        let images = images
-            .par_iter()
-            .map(|img_path| {
-                let inp = image::io::Reader::open(img_path)?.decode()?.into_rgb8();
-                let o = std::panic::catch_unwind(|| {
-                    let mut comp = mozjpeg::Compress::new(mozjpeg::ColorSpace::JCS_RGB);
+        let doc = PdfDocument::empty(name);
 
-                    comp.set_size(inp.width() as usize, inp.height() as usize);
-                    comp.set_fastest_defaults();
-                    comp.set_quality(70.0);
-                    comp.set_mem_dest();
-                    comp.start_compress();
+        for (i, image_path) in images.into_iter().enumerate() {
+            let d_image = printpdf::image_crate::open(image_path)?;
+            let image = printpdf::Image::from_dynamic_image(&d_image);
+            let (page, layer) = doc.add_page(
+                Px(d_image.width() as usize).into_pt(300.0).into(),
+                Px(d_image.height() as usize).into_pt(300.0).into(),
+                format!("Page {}", i + 1),
+            );
+            let layer_ref = doc.get_page(page).get_layer(layer);
+            image.add_to_layer(layer_ref, printpdf::ImageTransform::default());
+        }
 
-                    assert!(comp.write_scanlines(inp.as_bytes()));
-
-                    comp.finish_compress();
-                    comp.data_to_vec()
-                        .ok()
-                        .ok_or(eyre!("Something borked converting jpeg data to a vec?"))
-                })
-                .map_err(|_e| eyre!("Something borked while doing mozjpg"))?;
-                Ok(o?)
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        JpegToPdf::new()
-            .add_images(images)
-            .set_document_title(name)
-            .create_pdf(&mut BufWriter::new(out_file))?;
+        doc.save(&mut BufWriter::new(out_file))?;
 
         Ok(())
     }
