@@ -27,7 +27,7 @@ pub enum Command {
     Get {
         #[clap(subcommand)]
         command: GetCommand,
-        #[clap(long, arg_enum, default_value_t = OutputAsType::Path)]
+        #[clap(long, arg_enum, default_value_t = OutputAsType::Path, global = true)]
         output_as: OutputAsType,
     },
     /// Fetch archives from the site
@@ -49,9 +49,15 @@ pub enum Command {
 #[derive(Subcommand)]
 pub enum FetchCommand {
     /// Fetch all archives with the given tag
-    Tag { tag: String },
+    Tag {
+        #[clap(value_hint = clap::ValueHint::Other)]
+        tag: String
+    },
     /// Fetch an archive by id
-    Id { id: u32 },
+    Id {
+        #[clap(value_hint = clap::ValueHint::Other)]
+        id: u32
+    },
     // TODO: artist
 }
 
@@ -78,9 +84,6 @@ pub enum OutputAsType {
 pub enum GetCommand {
     /// List all archives with the given tags
     Tag {
-        #[clap(min_values = 1)]
-        tags: Vec<String>,
-
         /// Display a ui for selecting from after filtering
         #[clap(long)]
         pick: bool,
@@ -88,12 +91,17 @@ pub enum GetCommand {
         /// Open the rendered archive. Implies --pick
         #[clap(long)]
         open: bool,
+
+        #[clap(min_values = 1, value_hint = clap::ValueHint::Other)]
+        tags: Vec<String>,
     },
     /// Get an archive by id
     Id {
-        id: u32,
         #[clap(long)]
         open: bool,
+
+        #[clap(value_hint = clap::ValueHint::Other)]
+        id: u32,
     },
     /// Search for things
     Search {
@@ -115,6 +123,7 @@ pub enum GetCommand {
         #[clap(long)]
         open: bool,
 
+        #[clap(value_hint = clap::ValueHint::Other)]
         query: String,
     },
 }

@@ -245,7 +245,7 @@ fn do_pick(docs: &[Archive], open: bool, output_as: OutputAsType, fs: &FileSyste
         let path = fs.rendered_file_of_id(selected.id);
         opener::open(path)?;
     } else {
-        output_as.print(selected, &fs);
+        output_as.print(selected, fs);
     }
 
     Ok(())
@@ -322,7 +322,7 @@ impl OutputAsType {
             OutputAsType::Name => println!("{}", doc.name),
             OutputAsType::IdPath => println!("{}", fs.rendered_file_of_id(doc.id).display()),
             OutputAsType::Path => {
-                println!("{}", fs.rendered_file_for_archive_by_artist(&doc).display())
+                println!("{}", fs.rendered_file_for_archive_by_artist(doc).display())
             }
         }
     }

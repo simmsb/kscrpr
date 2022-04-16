@@ -165,13 +165,13 @@ impl FileSystem {
     }
 
     pub fn has_archive(&self, id: u32) -> bool {
-        return self.data_dir_of_id(id).exists();
+        self.data_dir_of_id(id).exists()
     }
 
     pub fn build_data_symlinks_for(&self, archive: &Archive) -> Result<()> {
         let target_dir = self.data_dir_of_id(archive.id);
         for tag in &archive.tags {
-            let tag_dir = self.data_dir_for_archive_by_tag(&tag.name, &archive);
+            let tag_dir = self.data_dir_for_archive_by_tag(&tag.name, archive);
             std::fs::create_dir_all(tag_dir.parent().unwrap())?;
 
             let src_dir_v = target_dir.clone().to_string_lossy().to_string();
@@ -183,7 +183,7 @@ impl FileSystem {
                 .with_section(move || dst_dir_v.header("Destination:"))?;
         }
 
-        let artist_dir = self.data_dir_for_archive_by_artist(&archive);
+        let artist_dir = self.data_dir_for_archive_by_artist(archive);
         std::fs::create_dir_all(artist_dir.parent().unwrap())?;
         symlink::symlink_dir(&target_dir, artist_dir)?;
 
@@ -231,7 +231,7 @@ impl FileSystem {
                 error = fuck_error(&e.into()),
                 id = archive.id,
                 name = %archive.name,
-                "Failed to extract zip, trating this as a non-fatal error though"
+                "Failed to extract zip, treating this as a non-fatal error though"
             );
             return Ok(false);
         }
@@ -243,7 +243,7 @@ impl FileSystem {
                 error = fuck_error(&e),
                 id = archive.id,
                 name = %archive.name,
-                "Failed to create symlinks?, trating this as a non-fatal error though"
+                "Failed to create symlinks?, treating this as a non-fatal error though"
             );
         }
 
@@ -254,7 +254,7 @@ impl FileSystem {
                 error = fuck_error(&e),
                 id = archive.id,
                 name = %archive.name,
-                "Failed to render archive and generate symlinks?, trating this as a non-fatal error though"
+                "Failed to render archive and generate symlinks?, treating this as a non-fatal error though"
             );
         }
 
@@ -278,7 +278,7 @@ impl FileSystem {
         }
 
         for tag in &archive.tags {
-            let tag_file = self.rendered_file_for_archive_by_tag(&tag.name, &archive);
+            let tag_file = self.rendered_file_for_archive_by_tag(&tag.name, archive);
             std::fs::create_dir_all(tag_file.parent().unwrap())?;
 
             let src_file_v = target_file.clone().to_string_lossy().to_string();
@@ -290,7 +290,7 @@ impl FileSystem {
                 .with_section(move || dst_file_v.header("Destination:"))?;
         }
 
-        let artist_file = self.rendered_file_for_archive_by_artist(&archive);
+        let artist_file = self.rendered_file_for_archive_by_artist(archive);
         std::fs::create_dir_all(artist_file.parent().unwrap())?;
         symlink::symlink_file(&target_file, artist_file)?;
 
@@ -320,14 +320,13 @@ impl FileSystem {
                     .extension()
                     .map_or(false, |ext| file_types.contains(ext))
             })
-            .map(|entry| entry.path().to_owned())
-            .collect::<Vec<_>>();
+            .map(|entry| entry.path().to_owned());
 
         let out_file = File::create(destination)?;
 
         let doc = PdfDocument::empty(name);
 
-        for (i, image_path) in images.into_iter().enumerate() {
+        for (i, image_path) in images.enumerate() {
             let d_image = printpdf::image_crate::open(image_path)?;
             let image = printpdf::Image::from_dynamic_image(&d_image);
             let (page, layer) = doc.add_page(
