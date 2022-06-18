@@ -10,20 +10,21 @@ use indicatif::ProgressBar;
 use printpdf::{image_crate::GenericImageView, PdfDocument, Px};
 use tracing::{debug, info_span, Instrument};
 
-use crate::archives::Archive;
-use crate::config::{self, Config};
-use crate::searcher::Searcher;
+use crate::archive::Archive;
+use crate::opts::{self, Opts};
+use crate::scrape::DownloadSize;
+use crate::search::Searcher;
 use crate::utils::fuck_error;
 
 pub struct FileSystem {
-    config: &'static Config,
+    config: &'static Opts,
     pub sled_db: sled::Db,
     pub searcher: Searcher,
 }
 
 impl FileSystem {
     pub fn open() -> Result<Self> {
-        let config = config::config();
+        let config = opts::opts();
 
         tracing::debug!("Ensuring data directory at {:?}", config.base_dir);
 
@@ -56,22 +57,22 @@ impl FileSystem {
     }
 
     pub fn reset_tantivy_dir() {
-        let config = config::config();
+        let config = opts::opts();
         let _ = std::fs::remove_dir_all(config.base_dir.join("meta/tantivy/"));
     }
 
     pub fn reset_tags_dir() {
-        let config = config::config();
+        let config = opts::opts();
         let _ = std::fs::remove_dir_all(config.base_dir.join("data/by_tags/"));
     }
 
     pub fn reset_artists_dir() {
-        let config = config::config();
+        let config = opts::opts();
         let _ = std::fs::remove_dir_all(config.base_dir.join("data/by_artist/"));
     }
 
     pub fn reset_rendered_dir() {
-        let config = config::config();
+        let config = opts::opts();
         let _ = std::fs::remove_dir_all(config.base_dir.join("rendered/by_tags/"));
         let _ = std::fs::remove_dir_all(config.base_dir.join("rendered/by_artist/"));
     }
@@ -193,6 +194,7 @@ impl FileSystem {
     pub async fn add_archive(
         &self,
         archive: &Archive,
+        download_size: DownloadSize,
         force: bool,
         msg_bar: &ProgressBar,
         prog_bar: &ProgressBar,
@@ -204,16 +206,11 @@ impl FileSystem {
 
         msg_bar.set_prefix("Downloading zip");
         msg_bar.set_message(format!("({})[{}]", archive.id, archive.name));
-        prog_bar.set_length(0);
+        prog_bar.set_length(download_size.0 as u64);
         prog_bar.set_position(0);
 
         let mut zip = archive
-            .download(|cl, ch| {
-                if let Some(cl) = cl {
-                    prog_bar.set_length(cl);
-                } else {
-                    prog_bar.inc_length(ch.len() as u64);
-                }
+            .download(|_cl, ch| {
                 prog_bar.inc(ch.len() as u64);
             })
             .instrument(

@@ -1,13 +1,14 @@
 use color_eyre::Result;
 
-pub mod archives;
+pub mod archive;
 pub mod client;
 pub mod command;
-pub mod config;
-pub mod downloader;
+pub mod opts;
+pub mod scrape;
 pub mod filesystem;
-pub mod searcher;
+pub mod search;
 pub mod utils;
+pub mod pick;
 
 fn install_tracing() -> color_eyre::Result<()> {
     use tracing_subscriber::fmt::format::FmtSpan;

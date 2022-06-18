@@ -2,22 +2,22 @@ use std::time::Duration;
 
 use clap::IntoApp;
 use color_eyre::Result;
-use dialoguer::theme::ColorfulTheme;
-use dialoguer::FuzzySelect;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use itertools::Itertools;
 
-use crate::archives::Archive;
-use crate::config::{
-    config, Command, Config, DirCommand, FetchCommand, GetCommand, IndexType, OutputAsType,
-};
-use crate::downloader::{by_id, fetch_tag_page};
+use crate::archive::Archive;
 use crate::filesystem::FileSystem;
+use crate::opts::{
+    opts, Command, DirCommand, FetchCommand, GetCommand, IndexType, Opts, OutputAsType,
+};
+use crate::pick;
+use crate::scrape::{by_id, fetch_tag_page};
 use crate::utils::{self, user_has_quit};
 
 pub async fn do_stuff() -> Result<()> {
-    let config = config();
+    let opts = opts();
 
-    config.command.go().await?;
+    opts.command.go().await?;
 
     Ok(())
 }
@@ -30,7 +30,7 @@ impl Command {
             Command::Fetch { command } => command.go().await,
             Command::Reindex => do_reindex().await,
             Command::Completion { shell } => {
-                shell.generate(&mut Config::command(), &mut std::io::stdout());
+                shell.generate(&mut Opts::command(), &mut std::io::stdout());
                 Ok(())
             }
         }
@@ -99,6 +99,7 @@ async fn do_reindex() -> Result<()> {
 impl FetchCommand {
     pub async fn go(&self) -> Result<()> {
         ctrlc::set_handler(move || {
+            println!("C-c acknowleged, quitting soon!");
             utils::RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
         })
         .unwrap();
@@ -119,9 +120,9 @@ impl FetchCommand {
                             .unwrap(),
                     ),
                 );
+                let prog_bar = bar.add(ProgressBar::new(1));
                 total_bar.enable_steady_tick(Duration::from_millis(200));
                 msg_bar.enable_steady_tick(Duration::from_millis(200));
-                let prog_bar = bar.add(ProgressBar::new(1));
                 prog_bar.enable_steady_tick(Duration::from_millis(200));
                 bar.set_move_cursor(true);
 
@@ -135,11 +136,15 @@ impl FetchCommand {
 
                     if let Some(a) = fetch_tag_page(&fs, tag, page, &msg_bar, &prog_bar).await? {
                         prog_bar.set_style(
-                            ProgressStyle::with_template("{bytes:>}/{total_bytes}").unwrap(),
+                            ProgressStyle::with_template("{wide_bar} {bytes:>}/{total_bytes}")
+                                .unwrap(),
                         );
 
-                        for archive in a {
-                            if fs.add_archive(&archive, false, &msg_bar, &prog_bar).await? {
+                        for (archive, size) in a {
+                            if fs
+                                .add_archive(&archive, size, false, &msg_bar, &prog_bar)
+                                .await?
+                            {
                                 new_archives.push(archive);
                             }
 
@@ -170,7 +175,7 @@ impl FetchCommand {
                 }
             }
             FetchCommand::Id { id } => {
-                let archive = by_id(*id).await?;
+                let (archive, size) = by_id(*id).await?;
 
                 let bar = MultiProgress::new();
                 let msg_bar = bar.add(
@@ -191,7 +196,10 @@ impl FetchCommand {
                 prog_bar.enable_steady_tick(Duration::from_millis(200));
                 bar.set_move_cursor(true);
 
-                if fs.add_archive(&archive, false, &msg_bar, &prog_bar).await? {
+                if fs
+                    .add_archive(&archive, size, false, &msg_bar, &prog_bar)
+                    .await?
+                {
                     eprintln!("Archive was already downloaded");
                 } else {
                     eprintln!("Added the following new archive:");
@@ -222,24 +230,19 @@ impl DirCommand {
     }
 }
 
-fn do_pick(docs: &[Archive], open: bool, output_as: OutputAsType, fs: &FileSystem) -> Result<()> {
-    let archive_names = docs
-        .iter()
-        .map(|a| a.pretty_single_line())
-        .collect::<Vec<_>>();
+fn do_pick(
+    query: &str,
+    docs: &[Archive],
+    open: bool,
+    output_as: OutputAsType,
+    fs: &FileSystem,
+) -> Result<()> {
+    let selection = pick::do_pick(query, docs)?;
 
-    let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
-        .with_prompt("Select archive")
-        .default(0)
-        .items(&archive_names)
-        .interact_opt()?;
-
-    let selection = match selection {
+    let selected = match selection {
         Some(s) => s,
         None => return Ok(()),
     };
-
-    let selected = &docs[selection];
 
     if open {
         let path = fs.rendered_file_of_id(selected.id);
@@ -264,7 +267,9 @@ impl GetCommand {
                 if docs.is_empty() {
                     eprintln!("Nothing found :(");
                 } else if pick {
-                    do_pick(&docs, *open, output_as, &fs)?;
+                    let search = Itertools::intersperse(tags.iter().cloned(), ", ".to_owned())
+                        .collect::<String>();
+                    do_pick(&search, &docs, *open, output_as, &fs)?;
                 } else {
                     for doc in docs {
                         output_as.print(&doc, &fs);
@@ -296,7 +301,7 @@ impl GetCommand {
                 if docs.is_empty() {
                     eprintln!("Nothing found :(");
                 } else if pick {
-                    do_pick(&docs, *open, output_as, &fs)?;
+                    do_pick(query, &docs, *open, output_as, &fs)?;
                 } else {
                     for doc in docs {
                         output_as.print(&doc, &fs);

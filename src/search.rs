@@ -7,7 +7,7 @@ use tantivy::schema::{Schema, INDEXED, STORED, TEXT};
 use tantivy::{doc, Index, IndexWriter, Term};
 use tokio::sync::Mutex;
 
-use crate::archives::Archive;
+use crate::archive::Archive;
 
 pub struct Searcher {
     index: Index,
@@ -66,7 +66,7 @@ impl Searcher {
 
     pub async fn commit(&self) -> Result<()> {
         let mut writer = self.writer.lock().await;
-        writer.prepare_commit()?.commit_async().await?;
+        writer.prepare_commit()?.commit_future().await?;
 
         Ok(())
     }

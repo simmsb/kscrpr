@@ -1,18 +1,18 @@
-use color_eyre::Result;
+use color_eyre::{eyre::eyre, Result};
 use indicatif::ProgressBar;
 use itertools::Itertools;
 use once_cell::sync::OnceCell;
 use reqwest::{Client, Url};
 use scraper::{Html, Selector};
 
-use crate::archives::{Archive, Tag};
+use crate::archive::{Archive, Tag};
 use crate::client::client;
-use crate::config::config;
 use crate::filesystem::FileSystem;
+use crate::opts::opts;
 use crate::utils::fuck_error;
 
-pub async fn by_id(id: u32) -> Result<Archive> {
-    let config = config();
+pub async fn by_id(id: u32) -> Result<(Archive, DownloadSize)> {
+    let config = opts();
     let client = client();
 
     let url = config.base_url.join("archive/")?.join(&id.to_string())?;
@@ -27,96 +27,72 @@ fn tag_view_archive_selector() -> &'static Selector {
     })
 }
 
-fn article_name_selector() -> &'static Selector {
-    static ARCHIVE_SELECTOR: OnceCell<Selector> = OnceCell::new();
-    ARCHIVE_SELECTOR
-        .get_or_init(|| Selector::parse("html body main#archive div.metadata h1.title").unwrap())
-}
-
-fn article_artist_selector() -> &'static Selector {
-    static ARCHIVE_SELECTOR: OnceCell<Selector> = OnceCell::new();
-    ARCHIVE_SELECTOR
-        .get_or_init(|| Selector::parse(".artists > td:nth-child(2) > a:nth-child(1)").unwrap())
-}
-
-fn article_parody_selector() -> &'static Selector {
-    static ARCHIVE_SELECTOR: OnceCell<Selector> = OnceCell::new();
-    ARCHIVE_SELECTOR
-        .get_or_init(|| Selector::parse(".parodies > td:nth-child(2) > a:nth-child(1)").unwrap())
-}
-
-fn article_tags_selector() -> &'static Selector {
-    static ARCHIVE_SELECTOR: OnceCell<Selector> = OnceCell::new();
-    ARCHIVE_SELECTOR.get_or_init(|| Selector::parse(".tags > td:nth-child(2) > a").unwrap())
-}
-
-fn article_pages_selector() -> &'static Selector {
-    static ARCHIVE_SELECTOR: OnceCell<Selector> = OnceCell::new();
-    ARCHIVE_SELECTOR.get_or_init(|| Selector::parse(".pages > td:nth-child(2)").unwrap())
-}
-
 fn article_download_selector() -> &'static Selector {
     static ARCHIVE_SELECTOR: OnceCell<Selector> = OnceCell::new();
     ARCHIVE_SELECTOR.get_or_init(|| Selector::parse(".download").unwrap())
 }
 
-async fn fetch_archive(client: &Client, url: &Url) -> Result<Archive> {
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+pub struct DownloadSize(pub u32);
+
+#[derive(serde::Deserialize)]
+struct SluggedMeta {
+    // id: u32,
+    slug: String,
+    name: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ArchiveMeta {
+    id: u32,
+    title: String,
+    pages: u16,
+    size: DownloadSize,
+    artists: Vec<SluggedMeta>,
+    #[serde(default)]
+    parodies: Vec<SluggedMeta>,
+    #[serde(default)]
+    tags: Vec<SluggedMeta>,
+}
+
+impl ArchiveMeta {
+    pub fn as_archive(&self, base_url: Url, download_url: Url) -> Archive {
+        Archive {
+            id: self.id,
+            name: self.title.clone(),
+            artist: self
+                .artists
+                .first()
+                .map(|a| a.name.clone())
+                .ok_or_else(|| eyre!("Archive had no artist?"))
+                .unwrap(),
+            parody: self
+                .parodies
+                .first()
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "original".to_owned()),
+            tags: self
+                .tags
+                .iter()
+                .map(|t| Tag {
+                    path: t.slug.clone(),
+                    name: t.name.clone(),
+                })
+                .collect_vec(),
+            num_pages: self.pages,
+            base_url,
+            download_url,
+        }
+    }
+}
+
+async fn fetch_archive(client: &Client, url: &Url) -> Result<(Archive, DownloadSize)> {
     tracing::debug!(%url, "Fetching archive");
+
+    let meta: ArchiveMeta = client.get(url.join(".json")?).send().await?.json().await?;
 
     let page = client.get(url.as_str()).send().await?.text().await?;
     let doc = Html::parse_document(&page);
-
-    let id: u32 = url
-        .path_segments()
-        .unwrap()
-        .nth(1)
-        .unwrap()
-        .parse()
-        .unwrap();
-
-    let name = doc
-        .select(article_name_selector())
-        .next()
-        .unwrap()
-        .text()
-        .next()
-        .unwrap()
-        .to_owned();
-
-    let artist = doc
-        .select(article_artist_selector())
-        .next()
-        .unwrap()
-        .text()
-        .next()
-        .unwrap()
-        .to_owned();
-
-    let parody = doc
-        .select(article_parody_selector())
-        .next()
-        .map(|p| p.text().join("").trim().to_owned())
-        .unwrap_or_else(|| "".to_owned());
-
-    let tags = doc
-        .select(article_tags_selector())
-        .map(|e| {
-            let path = e.value().attr("href").unwrap().to_owned();
-            let name = e.text().next().unwrap().to_owned();
-
-            Tag { path, name }
-        })
-        .collect::<Vec<_>>();
-
-    let num_pages: u16 = doc
-        .select(article_pages_selector())
-        .next()
-        .unwrap()
-        .text()
-        .next()
-        .unwrap()
-        .parse()
-        .unwrap();
 
     let download_url = doc
         .select(article_download_selector())
@@ -126,18 +102,9 @@ async fn fetch_archive(client: &Client, url: &Url) -> Result<Archive> {
         .attr("href")
         .unwrap();
 
-    let download_url = Url::parse(download_url).unwrap();
+    let download_url = Url::parse(download_url)?;
 
-    Ok(Archive {
-        id,
-        name,
-        artist,
-        parody,
-        tags,
-        num_pages,
-        base_url: url.clone(),
-        download_url,
-    })
+    Ok((meta.as_archive(url.clone(), download_url), meta.size))
 }
 
 pub async fn fetch_tag_page(
@@ -146,12 +113,12 @@ pub async fn fetch_tag_page(
     page_n: u32,
     msg_bar: &ProgressBar,
     prog_bar: &ProgressBar,
-) -> Result<Option<Vec<Archive>>> {
+) -> Result<Option<Vec<(Archive, DownloadSize)>>> {
     tracing::debug!(tag, page_n, "Fetching tag page");
     msg_bar.set_prefix("Fetching page");
     msg_bar.set_message("");
 
-    let config = config();
+    let config = opts();
     let client = client();
 
     let mut url = config.base_url.clone();

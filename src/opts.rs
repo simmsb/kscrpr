@@ -7,7 +7,7 @@ use url::Url;
 /// Download stuff
 #[derive(Parser)]
 #[clap(about, version)]
-pub struct Config {
+pub struct Opts {
     /// The base url to fetch from
     #[clap(env = "KSCRPR_BASE_URL", long)]
     pub base_url: Url,
@@ -160,7 +160,7 @@ pub enum DirCommand {
     Meta,
 }
 
-pub fn config() -> &'static Config {
-    static INSTANCE: OnceCell<Config> = OnceCell::new();
-    INSTANCE.get_or_init(Config::parse)
+pub fn opts() -> &'static Opts {
+    static INSTANCE: OnceCell<Opts> = OnceCell::new();
+    INSTANCE.get_or_init(Opts::parse)
 }
