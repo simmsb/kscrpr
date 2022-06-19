@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use clap::IntoApp;
@@ -6,7 +7,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use itertools::Itertools;
 
 use crate::archive::Archive;
-use crate::filesystem::FileSystem;
+use crate::filesystem::{self, FileSystem};
 use crate::opts::{
     opts, Command, DirCommand, FetchCommand, GetCommand, IndexType, Opts, OutputAsType,
 };
@@ -33,8 +34,42 @@ impl Command {
                 shell.generate(&mut Opts::command(), &mut std::io::stdout());
                 Ok(())
             }
+            Command::Stats => do_stats().await,
         }
     }
+}
+
+async fn do_stats() -> Result<()> {
+    let mut total = 0;
+    let mut tag_counter = HashMap::new();
+
+    let filesystem = filesystem::FileSystem::open()?;
+
+    for archive in filesystem.fetch_all() {
+        let archive = archive?;
+
+        total += 1;
+        for tag in &archive.tags {
+            *tag_counter
+                .raw_entry_mut()
+                .from_key(&tag.name)
+                .or_insert_with(|| (tag.name.clone(), 0))
+                .1 += 1;
+        }
+    }
+
+    println!("Total: {total}");
+
+    let tags = tag_counter
+        .into_iter()
+        .sorted_by(|(k0, _), (k1, _)| std::cmp::Ord::cmp(k0, k1))
+        .collect_vec();
+
+    for (k, v) in tags {
+        println!("{k}: {v}");
+    }
+
+    Ok(())
 }
 
 async fn do_reindex() -> Result<()> {

@@ -387,6 +387,14 @@ impl FileSystem {
         Ok(r)
     }
 
+    pub fn fetch_all(&self) -> impl Iterator<Item = Result<Archive>> {
+        self.sled_db.iter().map(|v| -> Result<Archive> {
+            let (_, v) = v?;
+            let a = serde_cbor::from_slice::<Archive>(&v)?;
+            Ok(a)
+        })
+    }
+
     pub fn fetch_doc(&self, id: u32) -> Result<Archive> {
         let v = self
             .sled_db

@@ -44,6 +44,8 @@ pub enum Command {
     Reindex,
     /// Generate shell completions
     Completion { shell: clap_complete_command::Shell },
+    /// Print stats about things
+    Stats,
 }
 
 #[derive(Subcommand)]

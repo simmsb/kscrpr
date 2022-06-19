@@ -1,3 +1,5 @@
+#![feature(hash_raw_entry)]
+
 use color_eyre::Result;
 
 pub mod archive;
